@@ -5,7 +5,7 @@ import asyncio
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
-SERVICE_ACCOUNT_FILE = r"hela-hero-planner-256ecb561827.json"
+SERVICE_ACCOUNT_FILE = "hela-hero-planner-256ecb561827.json"
 SPREADSHEET_ID = '15ewV9pkz0TyzLxQQSb8KnYYeAskxDODqQA8mxwgWAwk' #contains Master Tab tab as well as User Hero Data tab
 SPREADSHEET_ID_HERO_DATA = '1IEL1FVbCFNXqCUMfQQX8kQOIek-_J-Q9Z9EpGz-2lyA'  #contains Hero Data General tab
 
