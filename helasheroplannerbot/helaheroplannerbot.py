@@ -471,6 +471,10 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
         if current_level is not None and not (0 <= current_level <= max_level):
             raise ValueError(f"You have entered an invalid current level value for {hero_name} Please enter a value between 0 and {max_level}.")
         
+        # Additional check: current_level should not be higher than next_goal_level (if provided)
+        if next_goal_level is not None and current_level > next_goal_level:
+            raise ValueError(f"Current level cannot be higher than the next goal level.")
+        
         # 7. Input validation for current_relics (if provided)
         if current_relics is not None and current_relics < 0:
             raise ValueError("Current relics cannot be negative.")
@@ -488,6 +492,10 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
             if not (current_level_for_goal_check <= next_goal_level <= max_level):
                 raise ValueError(f"Invalid next goal level value. Please enter a value between the current level you have for this hero ({current_level_for_goal_check}) and the max level for this hero ({max_level}) or leave it blank.")
             
+            # Additional check: next_goal_level should not be higher than ultimate_goal_level (if provided)
+            if ultimate_goal_level is not None and next_goal_level > ultimate_goal_level:
+                raise ValueError(f"Next goal level cannot be higher than the ultimate goal level.")
+            
         # 10. Input validation for ultimate_goal_level (if provided)
         if ultimate_goal_level is not None:
             # Get the next_goal_level, either from the provided input or the existing data
@@ -501,8 +509,12 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
 
             if not (next_goal_level_for_check <= ultimate_goal_level <= max_level):
                 raise ValueError(f"Invalid ultimate goal level value. Please enter a value between the next goal level ({next_goal_level_for_check}) and the max level for this hero ({max_level}) or leave it blank.")
+            
+            # Additional check: current_level should not be higher than ultimate_goal_level
+            if current_level is not None and current_level > ultimate_goal_level:
+                raise ValueError(f"Current level cannot be higher than the ultimate goal level.")
         
-        # 10. Prepare the data to be updated, preserving existing values if not provided
+        # 11. Prepare the data to be updated, preserving existing values if not provided
         values_to_update = []
         if current_level is not None:
             values_to_update.append(current_level)
@@ -524,7 +536,7 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
         else:
             values_to_update.append(existing_hero_data[5] if len(existing_hero_data) > 5 and existing_hero_data[5] else '')
 
-        # 11. Update the spreadsheet
+        # 12. Update the spreadsheet
         range_to_update = f'User Hero Data!C{row_to_update}:F{row_to_update}'  # Update columns C, D, E, and F
         body = {'values': [values_to_update]}
         print(f"Updating spreadsheet at range {range_to_update} with values: {values_to_update}")
@@ -535,7 +547,7 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
             body=body
         ).execute()
 
-        # 12. Construct the success message based on which fields were updated
+        # 13. Construct the success message based on which fields were updated
         updated_fields = []
         if current_level is not None:
             updated_fields.append("current level")
