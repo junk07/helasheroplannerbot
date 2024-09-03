@@ -663,4 +663,147 @@ async def my_heroes_with_input_information(interaction: discord.Interaction):
         print(f"An error occurred while fetching user heroes: {e}")
         await interaction.followup.send("An error occurred while fetching your heroes. Please try again later.")
 
+@bot.tree.command(name="calculate_relics_needed", description="Calculate relics needed for various goals for a tracked hero")
+async def calculate_relics_needed(interaction: discord.Interaction, hero_name: str):
+    await interaction.response.defer()
+
+    try:
+        # 1. Fetch existing hero data from 'User Hero Data'
+        user_hero_data_range = 'User Hero Data!A2:J'  # Include columns up to J for calculations
+        print(f"1. Fetching existing hero data for {hero_name} from {user_hero_data_range}...")
+        result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=user_hero_data_range).execute()
+        user_data = result.get('values', [])
+        print(f"1. User data fetched: {user_data}")
+
+        # 2. Find the row to update, matching both user_id and hero_name
+        user_id = str(interaction.user.id)
+        row_to_update = next(
+            (i + 2 for i, row in enumerate(user_data) if row and row[0] == user_id and row[1] == hero_name),
+            None
+        )
+        print(f"2. Row to update: {row_to_update}")
+
+        if row_to_update is None:
+            raise ValueError(f"2. Hero '{hero_name}' was not found in your tracking list. Add the hero first using the 'add_hero' command.")
+
+        # 3. Fetch existing hero data (to get current level, relics, and goals)
+        existing_hero_data = next((row for row in user_data if row and row[0] == str(interaction.user.id) and row[1] == hero_name), None)
+
+        # 4. Fetch hero's max level from 'Hero Data General' sheet 
+        max_level_range = f'Hero Data General!A2:C'
+        print(f"4. Fetching all hero data (including max level) from {max_level_range}...")  
+        result = service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID_HERO_DATA, 
+            range=max_level_range
+        ).execute()
+        hero_data = result.get('values', [])
+        print(f"4. Hero data fetched: {hero_data}")
+
+        # 5. Find the row containing the hero's data and extract max_level
+        hero_row = next((row for row in hero_data if row and row[0] == hero_name), None)
+        if hero_row is None:
+            raise ValueError(f"5. Hero '{hero_name}' was not found in the hero database. (This should not happen, please contact Hela)") 
+
+        max_level = int(hero_row[2])
+        print(f"5. Max level for {hero_name}: {max_level}")
+
+        # 6. Get current level, relics, and goals from existing data or defaults
+        current_level = int(existing_hero_data[2]) if len(existing_hero_data) > 2 and existing_hero_data[2] else 0
+        current_relics = int(existing_hero_data[3]) if len(existing_hero_data) > 3 and existing_hero_data[3] else 0
+        
+        # Handle empty strings as None for goal levels
+        next_goal_level = int(existing_hero_data[4]) if len(existing_hero_data) > 4 and existing_hero_data[4] else None
+        if next_goal_level == 0:  # Treat 0 as not set
+            next_goal_level = None
+
+        ultimate_goal_level = int(existing_hero_data[5]) if len(existing_hero_data) > 5 and existing_hero_data[5] else None
+        if ultimate_goal_level == 0:
+            ultimate_goal_level = None
+
+        # 7. Calculate relic requirements
+        relic_milestones = [1, 10, 20, 30, 40, 50, 60]
+        relic_costs = [500, 6100, 13000, 54000, 80000, 100000, 120000]
+
+        # Next unlock level
+        next_unlock = next((level for level in relic_milestones if level > current_level and level <= max_level), "Hero Already Maxed")
+
+        if next_unlock == "Hero Already Maxed":
+            relics_to_next_unlock = "Hero Already Maxed"
+        else:  # Only calculate relic cost if next_unlock is an integer
+            relics_to_next_unlock = relic_costs[relic_milestones.index(next_unlock)] - current_relics
+            if relics_to_next_unlock < 0:
+                relics_to_next_unlock = "You already have enough relics for the next unlock level"
+
+        # Next goal level
+        if next_goal_level is None:
+            relics_to_next_goal = "No next goal level has been set"
+        elif current_level >= next_goal_level:
+            relics_to_next_goal = "Current level is higher than next goal level, please adjust using /manage_hero"
+        else:
+            # Find the indices of current_level and next_goal_level in relic_milestones
+            current_level_index = next((i for i, level in enumerate(relic_milestones) if level >= current_level), 0)
+            next_goal_level_index = relic_milestones.index(next_goal_level)
+
+            # Calculate the cumulative relic cost
+            total_relic_cost = sum(relic_costs[current_level_index:next_goal_level_index + 1])  # Include the cost for the next_goal_level itself
+
+            relics_to_next_goal = total_relic_cost - current_relics
+            if relics_to_next_goal < 0:
+                relics_to_next_goal = "You already have enough relics for the next goal level"
+
+        # Ultimate goal level
+        if ultimate_goal_level is None:
+            relics_to_ultimate_goal = "No ultimate goal level has been set"
+        elif current_level >= ultimate_goal_level:
+            relics_to_ultimate_goal = "Current level is higher than ultimate goal level, please adjust using /manage_hero"
+        else:
+            # Find the indices of current_level and ultimate_goal_level in relic_milestones
+            current_level_index = next((i for i, level in enumerate(relic_milestones) if level >= current_level), 0)
+            ultimate_goal_level_index = relic_milestones.index(ultimate_goal_level)
+
+            # Calculate the cumulative relic cost
+            total_relic_cost = sum(relic_costs[current_level_index:ultimate_goal_level_index + 1])
+
+            relics_to_ultimate_goal = total_relic_cost - current_relics
+            if relics_to_ultimate_goal < 0:
+                relics_to_ultimate_goal = "You already have enough relics for the ultimate goal level"
+
+        # 8. Update calculated values in the spreadsheet (columns G to J)
+        range_to_update = f'User Hero Data!G{row_to_update}:J{row_to_update}'
+        values_to_update = [[next_unlock, relics_to_next_unlock, relics_to_next_goal, relics_to_ultimate_goal]]
+        print(f"8. Updating spreadsheet at range {range_to_update} with values: {values_to_update}")
+        service.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=range_to_update,
+            valueInputOption='RAW',
+            body={'values': values_to_update}
+        ).execute()
+
+        # 9. Create the embed with hero information, formatting each item on a new line and with a colon separator
+        embed = discord.Embed(title=f"{hero_name} Information")
+
+        # Combine all information into a single field value with manual newlines
+        field_value = (
+            f"**Current Level:** {current_level}\n"
+            f"**Current Relics:** {current_relics}\n"
+            f"**Next Unlock Level:** {next_unlock}\n"
+            f"**Relics Needed for Next Unlock:** {relics_to_next_unlock}\n"
+            f"**Next Goal Level:** {next_goal_level if next_goal_level is not None else 'No next goal level has been set'}\n"
+            f"**Relics Needed for Next Goal:** {relics_to_next_goal}\n"
+            f"**Ultimate Goal Level:** {ultimate_goal_level if ultimate_goal_level is not None else 'No ultimate goal level has been set'}\n"
+            f"**Relics Needed for Ultimate Goal:** {relics_to_ultimate_goal}\n"
+        )
+
+        embed.add_field(name="\u200b", value=field_value, inline=False)  # Use a zero-width space for the field name
+
+        await interaction.edit_original_response(content="", embed=embed)
+
+    except ValueError as e:
+        await interaction.edit_original_response(content=str(e))
+    except Exception as e:
+        print(f"An error occurred while processing hero information: {e}")
+
+# Attach the autocomplete function to the calculate_relics_needed command parameter
+calculate_relics_needed.autocomplete("hero_name")(autocomplete_hero_info)
+
 bot.run("MTI3OTgwMTc1MDY1NTg2NDgzMg.GwwLJ7.srhVj6BNTPN_odUdSUdi-ki-jJksKv7vf095K4")
