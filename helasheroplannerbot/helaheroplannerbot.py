@@ -575,4 +575,47 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
 # Attach the autocomplete function to the manage_hero command parameter 
 manage_hero.autocomplete("hero_name")(autocomplete_hero_info)
 
+@bot.tree.command(name="hero_overview", description="Display a list of your tracked heroes with the information you have entered for them")
+async def my_heroes_with_input_information(interaction: discord.Interaction):
+    await interaction.response.defer()
+
+    user_id = str(interaction.user.id)
+
+    try:
+        # Fetch user's heroes with additional data from 'User Hero Data' sheet
+        user_hero_data_range = 'User Hero Data!A2:F'  # Include columns C to F for level, relics, and goals
+        result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=user_hero_data_range).execute()
+        user_data = result.get('values', [])
+
+        user_heroes_data = [row for row in user_data if row and row[0] == user_id]
+
+        if not user_heroes_data:
+            await interaction.followup.send("You haven't added any heroes yet!")
+            return
+
+        embed = discord.Embed(title=f"{interaction.user.name}'s Hero Overview")
+
+        # Format hero information for the embed
+        for hero_data in user_heroes_data:
+            hero_name = hero_data[1]
+            current_level = hero_data[2] if len(hero_data) > 2 and hero_data[2] else "N/A"
+            current_relics = hero_data[3] if len(hero_data) > 3 and hero_data[3] else "N/A"
+            next_goal_level = hero_data[4] if len(hero_data) > 4 and hero_data[4] else "N/A"
+            ultimate_goal_level = hero_data[5] if len(hero_data) > 5 and hero_data[5] else "N/A"
+
+            hero_info = (
+                f"**Current Level:** {current_level}\n"
+                f"**Current Relics:** {current_relics}\n"
+                f"**Next Goal Level:** {next_goal_level}\n"
+                f"**Ultimate Goal Level:** {ultimate_goal_level}\n"
+            )
+
+            embed.add_field(name=hero_name, value=hero_info, inline=False)
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        print(f"An error occurred while fetching user heroes: {e}")
+        await interaction.followup.send("An error occurred while fetching your heroes. Please try again later.")
+
 bot.run("MTI3OTgwMTc1MDY1NTg2NDgzMg.GwwLJ7.srhVj6BNTPN_odUdSUdi-ki-jJksKv7vf095K4")
