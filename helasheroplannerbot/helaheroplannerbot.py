@@ -422,13 +422,14 @@ async def remove_hero(interaction: discord.Interaction, hero_name: str):
 remove_hero.autocomplete("hero_name")(autocomplete_hero_info)
 
 @bot.tree.command(name="manage_hero", description="Update the current level of a tracked hero")
-async def manage_hero(interaction: discord.Interaction, hero_name: str, current_level: int = None,current_relics: int = None):
-    
+async def manage_hero(interaction: discord.Interaction, hero_name: str, current_level: int = None,current_relics: int = None, next_goal_level: int = None, ultimate_goal_level: int = None):
+    global existing_hero_data
+
     await interaction.response.defer()
 
     try:
         # 1. Fetch existing hero data from 'User Hero Data'
-        user_hero_data_range = 'User Hero Data!A2:D' 
+        user_hero_data_range = 'User Hero Data!A2:F' 
         print(f"Fetching existing hero data for {hero_name} from {user_hero_data_range}...") 
         result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=user_hero_data_range).execute()
         user_data = result.get('values', [])
@@ -445,37 +446,63 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
         if row_to_update is None:
             raise ValueError(f"{hero_name} was not found in your tracking list. Add the hero first using the 'add_hero' command.")
         
-        # 3. Fetch existing hero data (to get current level and relics) - MOVED UP
+        # 3. Fetch existing hero data (to get current level, relics, and next goal level)
         existing_hero_data = next((row for row in user_data if row and row[0] == str(interaction.user.id) and row[1] == hero_name), None)
 
-        # 4. If current_level is provided, fetch hero's max level and validate
-        if current_level is not None:
-            max_level_range = f'Hero Data General!A2:C'
-            print(f"Fetching all hero data (including max level) from {max_level_range}...")  
-            result = service.spreadsheets().values().get(
-                spreadsheetId=SPREADSHEET_ID_HERO_DATA, 
-                range=max_level_range
-            ).execute()
-            hero_data = result.get('values', [])
-            print(f"Hero data fetched: {hero_data}")
+        # 4. Fetch hero's max level from 'Hero Data General' sheet 
+        max_level_range = f'Hero Data General!A2:C'
+        print(f"4. Fetching all hero data (including max level) from {max_level_range}...")  
+        result = service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID_HERO_DATA, 
+            range=max_level_range
+        ).execute()
+        hero_data = result.get('values', [])
+        print(f"Hero data fetched: {hero_data}")
 
-            # 5. Find the row containing the hero's data and extract max_level
-            hero_row = next((row for row in hero_data if row and row[0] == hero_name), None)
-            if hero_row is None:
-                raise ValueError(f"{hero_name} was not found in the hero database. (This should not happen, please contact Hela)") 
+        # 5. Find the row containing the hero's data and extract max_level
+        hero_row = next((row for row in hero_data if row and row[0] == hero_name), None)
+        if hero_row is None:
+            raise ValueError(f"{hero_name} was not found in the hero database. (This should not happen, please contact Hela)") 
 
-            max_level = int(hero_row[2])
-            print(f"Max level for {hero_name}: {max_level}")
+        max_level = int(hero_row[2])
+        print(f"Max level for {hero_name}: {max_level}")
 
-            # 6. Input validation for current_level (if provided)
-            if not (0 <= current_level <= max_level):
-                raise ValueError(f"You have entered an invalid current level value for {hero_name} Please enter a value between 0 and {max_level}.")
+        # 6. Input validation for current_level (if provided)
+        if current_level is not None and not (0 <= current_level <= max_level):
+            raise ValueError(f"You have entered an invalid current level value for {hero_name} Please enter a value between 0 and {max_level}.")
         
         # 7. Input validation for current_relics (if provided)
         if current_relics is not None and current_relics < 0:
             raise ValueError("Current relics cannot be negative.")
         
-        # 8. Prepare the data to be updated, preserving existing values if not provided
+        # 8. Input validation for next_goal_level (if provided)
+        if next_goal_level is not None:
+            # Get the current level, either from the provided input or the existing data
+            current_level_for_goal_check = current_level if current_level is not None else \
+                (int(existing_hero_data[2]) if len(existing_hero_data) > 2 and existing_hero_data[2] else 0)
+
+            # Handle the case where current_level_for_goal_check is None
+            if current_level_for_goal_check is None:
+                current_level_for_goal_check = 0  # Set to 0 if not available
+
+            if not (current_level_for_goal_check <= next_goal_level <= max_level):
+                raise ValueError(f"Invalid next goal level value. Please enter a value between the current level you have for this hero ({current_level_for_goal_check}) and the max level for this hero ({max_level}) or leave it blank.")
+            
+        # 10. Input validation for ultimate_goal_level (if provided)
+        if ultimate_goal_level is not None:
+            # Get the next_goal_level, either from the provided input or the existing data
+            next_goal_level_for_check = next_goal_level if next_goal_level is not None else \
+                (int(existing_hero_data[4]) if len(existing_hero_data) > 4 and existing_hero_data[4] else 0)
+
+            # If next_goal_level is also not available, use current_level
+            if next_goal_level_for_check is None or next_goal_level_for_check == 0:
+                next_goal_level_for_check = current_level if current_level is not None else \
+                    (int(existing_hero_data[2]) if len(existing_hero_data) > 2 and existing_hero_data[2] else 0)
+
+            if not (next_goal_level_for_check <= ultimate_goal_level <= max_level):
+                raise ValueError(f"Invalid ultimate goal level value. Please enter a value between the next goal level ({next_goal_level_for_check}) and the max level for this hero ({max_level}) or leave it blank.")
+        
+        # 10. Prepare the data to be updated, preserving existing values if not provided
         values_to_update = []
         if current_level is not None:
             values_to_update.append(current_level)
@@ -487,8 +514,18 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
         else:
             values_to_update.append(int(existing_hero_data[3]) if len(existing_hero_data) > 3 and existing_hero_data[3] else 0) # Preserve existing relics if not provided
 
-        # 9. Update the level in the spreadsheet
-        range_to_update = f'User Hero Data!C{row_to_update}:D{row_to_update}'  # Update columns C and D' 
+        if next_goal_level is not None:
+            values_to_update.append(next_goal_level)
+        else:
+            values_to_update.append(existing_hero_data[4] if len(existing_hero_data) > 4 and existing_hero_data[4] else '')
+
+        if ultimate_goal_level is not None:
+            values_to_update.append(ultimate_goal_level)
+        else:
+            values_to_update.append(existing_hero_data[5] if len(existing_hero_data) > 5 and existing_hero_data[5] else '')
+
+        # 11. Update the spreadsheet
+        range_to_update = f'User Hero Data!C{row_to_update}:F{row_to_update}'  # Update columns C, D, E, and F
         body = {'values': [values_to_update]}
         print(f"Updating spreadsheet at range {range_to_update} with values: {values_to_update}")
         service.spreadsheets().values().update(
@@ -498,12 +535,16 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
             body=body
         ).execute()
 
-        # 10. Construct the success message based on which fields were updated
+        # 12. Construct the success message based on which fields were updated
         updated_fields = []
         if current_level is not None:
             updated_fields.append("current level")
         if current_relics is not None:
             updated_fields.append("current relics")
+        if next_goal_level is not None:
+            updated_fields.append("next goal level")
+        if ultimate_goal_level is not None:
+            updated_fields.append("ultimate goal level")
 
         success_message = f"{hero_name} " 
         if updated_fields:
