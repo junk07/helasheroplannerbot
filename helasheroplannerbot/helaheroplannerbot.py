@@ -421,4 +421,105 @@ async def remove_hero(interaction: discord.Interaction, hero_name: str):
 # Attach the autocomplete function to the remove_hero command parameter (reuse the existing one)
 remove_hero.autocomplete("hero_name")(autocomplete_hero_info)
 
+@bot.tree.command(name="manage_hero", description="Update the current level of a tracked hero")
+async def manage_hero(interaction: discord.Interaction, hero_name: str, current_level: int = None,current_relics: int = None):
+    
+    await interaction.response.defer()
+
+    try:
+        # 1. Fetch existing hero data from 'User Hero Data'
+        user_hero_data_range = 'User Hero Data!A2:D' 
+        print(f"Fetching existing hero data for {hero_name} from {user_hero_data_range}...") 
+        result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=user_hero_data_range).execute()
+        user_data = result.get('values', [])
+        print(f"User data fetched: {user_data}") 
+
+        # 2. Find the row to update, matching both user_id and hero_name
+        user_id = str(interaction.user.id) 
+        row_to_update = next(
+            (i + 2 for i, row in enumerate(user_data) if row and row[0] == user_id and row[1] == hero_name),
+            None
+        )
+        print(f"Row to update: {row_to_update}") 
+
+        if row_to_update is None:
+            raise ValueError(f"{hero_name} was not found in your tracking list. Add the hero first using the 'add_hero' command.")
+        
+        # 3. Fetch existing hero data (to get current level and relics) - MOVED UP
+        existing_hero_data = next((row for row in user_data if row and row[0] == str(interaction.user.id) and row[1] == hero_name), None)
+
+        # 4. If current_level is provided, fetch hero's max level and validate
+        if current_level is not None:
+            max_level_range = f'Hero Data General!A2:C'
+            print(f"Fetching all hero data (including max level) from {max_level_range}...")  
+            result = service.spreadsheets().values().get(
+                spreadsheetId=SPREADSHEET_ID_HERO_DATA, 
+                range=max_level_range
+            ).execute()
+            hero_data = result.get('values', [])
+            print(f"Hero data fetched: {hero_data}")
+
+            # 5. Find the row containing the hero's data and extract max_level
+            hero_row = next((row for row in hero_data if row and row[0] == hero_name), None)
+            if hero_row is None:
+                raise ValueError(f"{hero_name} was not found in the hero database. (This should not happen, please contact Hela)") 
+
+            max_level = int(hero_row[2])
+            print(f"Max level for {hero_name}: {max_level}")
+
+            # 6. Input validation for current_level (if provided)
+            if not (0 <= current_level <= max_level):
+                raise ValueError(f"You have entered an invalid current level value for {hero_name} Please enter a value between 0 and {max_level}.")
+        
+        # 7. Input validation for current_relics (if provided)
+        if current_relics is not None and current_relics < 0:
+            raise ValueError("Current relics cannot be negative.")
+        
+        # 8. Prepare the data to be updated, preserving existing values if not provided
+        values_to_update = []
+        if current_level is not None:
+            values_to_update.append(current_level)
+        else:
+            values_to_update.append(int(existing_hero_data[2]) if len(existing_hero_data) > 2 and existing_hero_data[2] else 0)  # Preserve existing level if not provided
+
+        if current_relics is not None:
+            values_to_update.append(current_relics)
+        else:
+            values_to_update.append(int(existing_hero_data[3]) if len(existing_hero_data) > 3 and existing_hero_data[3] else 0) # Preserve existing relics if not provided
+
+        # 9. Update the level in the spreadsheet
+        range_to_update = f'User Hero Data!C{row_to_update}:D{row_to_update}'  # Update columns C and D' 
+        body = {'values': [values_to_update]}
+        print(f"Updating spreadsheet at range {range_to_update} with values: {values_to_update}")
+        service.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=range_to_update,
+            valueInputOption='RAW',
+            body=body
+        ).execute()
+
+        # 10. Construct the success message based on which fields were updated
+        updated_fields = []
+        if current_level is not None:
+            updated_fields.append("current level")
+        if current_relics is not None:
+            updated_fields.append("current relics")
+
+        success_message = f"{hero_name} " 
+        if updated_fields:
+            success_message += f"{' and '.join(updated_fields)} updated successfully!"
+        else:
+            success_message += "not updated. No new values were provided."
+
+        await interaction.edit_original_response(content=success_message)
+
+    except ValueError as e:
+        await interaction.edit_original_response(content=str(e))
+    except Exception as e:
+        print(f"An error occurred while updating hero data: {e}")
+        await interaction.edit_original_response(content="An error occurred while updating hero data. Please try again later.")
+
+# Attach the autocomplete function to the manage_hero command parameter 
+manage_hero.autocomplete("hero_name")(autocomplete_hero_info)
+
 bot.run("MTI3OTgwMTc1MDY1NTg2NDgzMg.GwwLJ7.srhVj6BNTPN_odUdSUdi-ki-jJksKv7vf095K4")
