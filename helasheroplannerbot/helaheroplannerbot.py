@@ -270,63 +270,61 @@ async def autocomplete_hero_info(interaction: discord.Interaction, current: str)
     # Limit the number of suggestions to 25 (Discord's limit)
     return matching_heroes[:25]
 
-# /add_hero command
 @bot.tree.command(name="add_hero", description="Add a hero to your tracking list")
 async def add_hero(interaction: discord.Interaction, hero_name: str):
-    await interaction.response.defer()  # Acknowledge the command immediately
+    await interaction.response.defer()
 
     try:
-        user_id = interaction.user.id
+        # Wrap the potentially long-running parts in an asyncio.wait_for block
+        async with asyncio.timeout(60):  # Timeout after 60 seconds
+            user_id = str(interaction.user.id)
 
-        # ... (Check if the hero exists in the 'Hero Data General' sheet - this part remains the same)
+            # Check if the hero exists in the 'Hero Data General' sheet
+            hero_data_range = 'Hero Data General!A2:A' 
+            result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID_HERO_DATA, range=hero_data_range).execute()
+            hero_names = [row[0] for row in result.get('values', []) if row]
 
-        print(f"Hero {hero_name} exists. Checking if already added...")
+            if hero_name not in hero_names:
+                await interaction.followup.send(f"Hero '{hero_name}' not found in the database. Please double-check the spelling or use the autocomplete feature for suggestions.")
+                return
 
-        # Check if the hero is already added by the user
-        user_hero_data_range = f'{SPREADSHEET_ID}User Hero Data!A2:B' 
-        result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=user_hero_data_range).execute() 
-        user_data = result.get('values', [])
+            print(f"Hero {hero_name} exists. Checking if already added...")
 
-        existing_row_index = None
-        for i, row in enumerate(user_data):
-            if row and row[0] == str(user_id) and row[1] == hero_name:
-                existing_row_index = i + 2  # Adjust for 0-based indexing and header row
-                break
+            # Fetch all data from the 'User Hero Data' sheet
+            user_hero_data_range = 'User Hero Data!A2:B' 
+            result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=user_hero_data_range).execute() 
+            user_data = result.get('values', [])
+            print(f"Fetched user data: {user_data}")
 
-        if existing_row_index:
-            print(f"Hero {hero_name} already added by user {user_id}. Updating existing row...")
-            
-            # Update the existing row (you'll need to adjust the values based on your data structure)
-            values = [[user_id, hero_name]]  # Add other updated data columns as needed
-            body = {'values': values}
-            result = service.spreadsheets().values().update(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f'{SPREADSHEET_ID}!A{existing_row_index}:B{existing_row_index}',  # Update the specific row
-                valueInputOption='RAW',
-                body=body
-            ).execute()
+            # Iterate through the rows and check for duplicates
+            for row in user_data:
+                print(f"Checking row: {row}")
+                if row and row[0] == user_id and row[1].strip() == hero_name:
+                    raise Exception(f"Hero '{hero_name}' is already in your tracking list.")
 
-            await interaction.followup.send(f"Hero '{hero_name}' already exists in your tracking list. Its data has been updated.")
-
-        else:
             print(f"Adding hero {hero_name} for user {user_id}...")
 
             # Insert hero data into the 'User Hero Data' sheet
-            values = [[user_id, hero_name]]  # Add other data columns as needed
+            values = [[user_id, hero_name]] 
             body = {'values': values}
             result = service.spreadsheets().values().append(
                 spreadsheetId=SPREADSHEET_ID,
-                range=SPREADSHEET_ID, 
-                valueInputOption='RAW', 
+                range='User Hero Data',
+                valueInputOption='RAW',
                 body=body
             ).execute()
 
             print(f"Hero {hero_name} added successfully for user {user_id}.")
             await interaction.followup.send(f"Hero '{hero_name}' added to your tracking list!")
 
+    except asyncio.TimeoutError:
+        await interaction.followup.send("The request timed out. Adding the hero is taking too long. Please try again later.")
     except Exception as e:
-        print(f"An error occurred while adding/updating hero: {e}")
-        await interaction.followup.send("An error occurred while processing your request. Please try again later.")
+        if "already in your tracking list" in str(e):
+            await interaction.followup.send(f"You already have '{hero_name}' in your tracking list. You can only add each hero once.")
+        else:
+            print(f"An unexpected error occurred while adding the hero: {e}")
+            await interaction.followup.send("An unexpected error occurred while adding the hero. Please try again later or contact the Hela if the issue persists.")
 
 # Attach the autocomplete function to the add_hero command parameter
 add_hero.autocomplete("hero_name")(autocomplete_hero_info)
