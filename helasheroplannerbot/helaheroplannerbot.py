@@ -329,4 +329,34 @@ async def add_hero(interaction: discord.Interaction, hero_name: str):
 # Attach the autocomplete function to the add_hero command parameter
 add_hero.autocomplete("hero_name")(autocomplete_hero_info)
 
+@bot.tree.command(name="my_heroes", description="Display the list of heroes you have added")
+async def my_heroes(interaction: discord.Interaction):
+    await interaction.response.defer() 
+
+    user_id = str(interaction.user.id) 
+
+    try:
+        # Fetch user's heroes from 'User Hero Data' sheet
+        user_hero_data_range = 'User Hero Data!A2:B'
+        result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=user_hero_data_range).execute()
+        user_data = result.get('values', [])
+
+        user_heroes = [row[1] for row in user_data if row and row[0] == user_id]
+
+        if not user_heroes:
+            await interaction.followup.send("You haven't added any heroes yet!") 
+            return
+
+        embed = discord.Embed(title=f"{interaction.user.name}'s Heroes") 
+
+        # Format hero information for the embed, removing bold formatting and extra lines
+        hero_list = "\n".join(user_heroes)  
+        embed.add_field(name="Heroes", value=hero_list, inline=False)
+
+        await interaction.followup.send(embed=embed) 
+
+    except Exception as e: 
+        print(f"An error occurred while fetching user heroes: {e}")
+        await interaction.followup.send("An error occurred while fetching your heroes. Please try again later.") 
+
 bot.run("MTI3OTgwMTc1MDY1NTg2NDgzMg.GwwLJ7.srhVj6BNTPN_odUdSUdi-ki-jJksKv7vf095K4")
