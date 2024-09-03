@@ -359,4 +359,66 @@ async def my_heroes(interaction: discord.Interaction):
         print(f"An error occurred while fetching user heroes: {e}")
         await interaction.followup.send("An error occurred while fetching your heroes. Please try again later.") 
 
+@bot.tree.command(name="remove_hero", description="Remove a hero from your tracking list")
+async def remove_hero(interaction: discord.Interaction, hero_name: str):
+    await interaction.response.defer()
+
+    user_id = str(interaction.user.id)
+
+    try:
+        print(f"Attempting to remove hero '{hero_name}' for user {user_id}")
+
+        # Fetch user's heroes from 'User Hero Data' sheet
+        user_hero_data_range = 'User Hero Data!A2:B'
+        result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=user_hero_data_range).execute()
+        user_data = result.get('values', [])
+
+        print(f"Fetched user data: {user_data}")
+
+        # Find the row index to delete
+        row_index_to_delete = None
+        for i, row in enumerate(user_data):
+            if row and row[0] == user_id and row[1].strip() == hero_name:
+                row_index_to_delete = i + 2  # +2 to account for header row and 0-based indexing
+                break
+
+        if row_index_to_delete:
+            print(f"Found hero to delete at row index {row_index_to_delete}")
+
+            # --- Place the code block to print sheet properties here ---
+            spreadsheet = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+            sheets = spreadsheet.get('sheets', '')
+            for sheet in sheets:  
+
+                print(f"Sheet Name: {sheet['properties']['title']}, Sheet ID: {sheet['properties']['sheetId']}")
+            # --- End of code block ---
+
+            # Delete the row
+            requests = [{
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": 1156414171,  # Assuming 'User Hero Data' is the second sheet
+                        "dimension": "ROWS",
+                        "startIndex": row_index_to_delete - 1,
+                        "endIndex": row_index_to_delete,
+                    }
+                }
+            }]
+
+            body = {'requests': requests}
+            service.spreadsheets().batchUpdate(spreadsheetId=SPREADSHEET_ID, body=body).execute()
+
+            print(f"Hero '{hero_name}' removed successfully for user {user_id}")
+            await interaction.followup.send(f"Hero '{hero_name}' removed from your tracking list!")
+        else:
+            print(f"Hero '{hero_name}' not found in user's list")
+            await interaction.followup.send(f"Hero '{hero_name}' not found in your tracking list.")
+
+    except Exception as e:
+        print(f"An error occurred while removing the hero: {e}")
+        await interaction.followup.send("An error occurred while removing the hero. Please try again later.")
+
+# Attach the autocomplete function to the remove_hero command parameter (reuse the existing one)
+remove_hero.autocomplete("hero_name")(autocomplete_hero_info)
+
 bot.run("MTI3OTgwMTc1MDY1NTg2NDgzMg.GwwLJ7.srhVj6BNTPN_odUdSUdi-ki-jJksKv7vf095K4")
