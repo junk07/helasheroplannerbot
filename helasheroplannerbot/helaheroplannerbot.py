@@ -575,7 +575,7 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
 # Attach the autocomplete function to the manage_hero command parameter 
 manage_hero.autocomplete("hero_name")(autocomplete_hero_info)
 
-@bot.tree.command(name="hero_overview", description="Display a list of your tracked heroes with the information you have entered for them")
+@bot.tree.command(name="my_heroes_with_input_information", description="Display a list of your tracked heroes with the information you have entered for them")
 async def my_heroes_with_input_information(interaction: discord.Interaction):
     await interaction.response.defer()
 
@@ -593,26 +593,71 @@ async def my_heroes_with_input_information(interaction: discord.Interaction):
             await interaction.followup.send("You haven't added any heroes yet!")
             return
 
-        embed = discord.Embed(title=f"{interaction.user.name}'s Hero Overview")
+        # Paginate the hero data
+        heroes_per_page = 10  
+        current_page = 0
+        total_pages = (len(user_heroes_data) + heroes_per_page - 1) // heroes_per_page 
 
-        # Format hero information for the embed
-        for hero_data in user_heroes_data:
-            hero_name = hero_data[1]
-            current_level = hero_data[2] if len(hero_data) > 2 and hero_data[2] else "N/A"
-            current_relics = hero_data[3] if len(hero_data) > 3 and hero_data[3] else "N/A"
-            next_goal_level = hero_data[4] if len(hero_data) > 4 and hero_data[4] else "N/A"
-            ultimate_goal_level = hero_data[5] if len(hero_data) > 5 and hero_data[5] else "N/A"
+        def create_embed(page_num):
+            start_idx = page_num * heroes_per_page
+            end_idx = min(start_idx + heroes_per_page, len(user_heroes_data))
+            page_heroes_data = user_heroes_data[start_idx:end_idx]
 
-            hero_info = (
-                f"**Current Level:** {current_level}\n"
-                f"**Current Relics:** {current_relics}\n"
-                f"**Next Goal Level:** {next_goal_level}\n"
-                f"**Ultimate Goal Level:** {ultimate_goal_level}\n"
-            )
+            embed = discord.Embed(title=f"{interaction.user.name}'s Hero Overview (Page {page_num + 1}/{total_pages})")
 
-            embed.add_field(name=hero_name, value=hero_info, inline=False)
+            for hero_data in page_heroes_data:
+                hero_name = hero_data[1]
+                hero_name_with_underline = f"__{hero_name}__"
+                current_level = hero_data[2] if len(hero_data) > 2 and hero_data[2] else "N/A"
+                current_relics = hero_data[3] if len(hero_data) > 3 and hero_data[3] else "N/A"
+                next_goal_level = hero_data[4] if len(hero_data) > 4 and hero_data[4] else "N/A"
+                ultimate_goal_level = hero_data[5] if len(hero_data) > 5 and hero_data[5] else "N/A"
 
-        await interaction.followup.send(embed=embed)
+                hero_info = (
+                    f"**Current Level:** {current_level}\n"
+                    f"**Current Relics:** {current_relics}\n"
+                    f"**Next Goal Level:** {next_goal_level}\n"
+                    f"**Ultimate Goal Level:** {ultimate_goal_level}\n"
+                )
+
+                embed.add_field(name=hero_name_with_underline, value=hero_info, inline=False)
+            return embed
+
+        # Create the initial embed
+        embed = create_embed(current_page)
+
+        # Create buttons for navigation
+        previous_button = discord.ui.Button(label="Previous", style=discord.ButtonStyle.blurple, disabled=True) 
+        next_button = discord.ui.Button(label="Next", style=discord.ButtonStyle.blurple, disabled=total_pages == 1) 
+
+        # View to hold the buttons
+        view = discord.ui.View()
+        view.add_item(previous_button)
+        view.add_item(next_button)
+
+        # Button callback functions
+        async def previous_callback(interaction):
+            nonlocal current_page
+            current_page -= 1
+            await interaction.response.edit_message(embed=create_embed(current_page), view=update_view())
+
+        async def next_callback(interaction):
+            nonlocal current_page
+            current_page += 1
+            await interaction.response.edit_message(embed=create_embed(current_page), view=update_view())
+
+        # Function to update button states based on current_page
+        def update_view():
+            previous_button.disabled = current_page == 0
+            next_button.disabled = current_page == total_pages - 1
+            return view
+
+        # Assign callbacks to the buttons
+        previous_button.callback = previous_callback
+        next_button.callback = next_callback
+
+        # Send the initial embed with the buttons
+        await interaction.followup.send(embed=embed, view=view)
 
     except Exception as e:
         print(f"An error occurred while fetching user heroes: {e}")
