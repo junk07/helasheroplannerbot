@@ -803,7 +803,6 @@ async def calculate_relics_needed(interaction: discord.Interaction, hero_name: s
 # Attach the autocomplete function to the calculate_relics_needed command parameter
 calculate_relics_needed.autocomplete("hero_name")(autocomplete_hero_info)
 
-
 @bot.tree.command(name="help", description="Display all bot commands and their descriptions")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="Hela's Hero Planner Bot Commands", description="Here are the available commands:")
