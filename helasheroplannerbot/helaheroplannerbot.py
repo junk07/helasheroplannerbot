@@ -429,7 +429,7 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
 
     try:
         # 1. Fetch existing hero data from 'User Hero Data'
-        user_hero_data_range = 'User Hero Data!A2:F' 
+        user_hero_data_range = 'User Hero Data!A2:J' 
         print(f"Fetching existing hero data for {hero_name} from {user_hero_data_range}...") 
         result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=user_hero_data_range).execute()
         user_data = result.get('values', [])
@@ -467,19 +467,32 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
         max_level = int(hero_row[2])
         print(f"Max level for {hero_name}: {max_level}")
 
-        # 6. Input validation for current_level (if provided)
+        # 6. Get current level, relics, and goals from existing data or defaults
+        current_level = int(existing_hero_data[2]) if len(existing_hero_data) > 2 and existing_hero_data[2] else 0
+        current_relics = int(existing_hero_data[3]) if len(existing_hero_data) > 3 and existing_hero_data[3] else 0
+
+        # 7.Handle empty strings as None for goal levels
+        next_goal_level = int(existing_hero_data[4]) if len(existing_hero_data) > 4 and existing_hero_data[4] else None
+        if next_goal_level == 0:  # Treat 0 as not set
+            next_goal_level = None
+
+        ultimate_goal_level = int(existing_hero_data[5]) if len(existing_hero_data) > 5 and existing_hero_data[5] else None
+        if ultimate_goal_level == 0:
+            ultimate_goal_level = None
+
+        # 8. Input validation for current_level (if provided)
         if current_level is not None and not (0 <= current_level <= max_level):
             raise ValueError(f"You have entered an invalid current level value for {hero_name} Please enter a value between 0 and {max_level}.")
         
-        # Additional check: current_level should not be higher than next_goal_level (if provided)
+        # 9.Additional check: current_level should not be higher than next_goal_level (if provided)
         if next_goal_level is not None and current_level > next_goal_level:
             raise ValueError(f"Current level cannot be higher than the next goal level.")
         
-        # 7. Input validation for current_relics (if provided)
+        # 10. Input validation for current_relics (if provided)
         if current_relics is not None and current_relics < 0:
             raise ValueError("Current relics cannot be negative.")
         
-        # 8. Input validation for next_goal_level (if provided)
+        # 11. Input validation for next_goal_level (if provided)
         if next_goal_level is not None:
             # Get the current level, either from the provided input or the existing data
             current_level_for_goal_check = current_level if current_level is not None else \
@@ -496,7 +509,7 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
             if ultimate_goal_level is not None and next_goal_level > ultimate_goal_level:
                 raise ValueError(f"Next goal level cannot be higher than the ultimate goal level.")
             
-        # 10. Input validation for ultimate_goal_level (if provided)
+        # 12. Input validation for ultimate_goal_level (if provided)
         if ultimate_goal_level is not None:
             # Get the next_goal_level, either from the provided input or the existing data
             next_goal_level_for_check = next_goal_level if next_goal_level is not None else \
@@ -513,33 +526,67 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
             # Additional check: current_level should not be higher than ultimate_goal_level
             if current_level is not None and current_level > ultimate_goal_level:
                 raise ValueError(f"Current level cannot be higher than the ultimate goal level.")
-        
-        # 11. Prepare the data to be updated, preserving existing values if not provided
-        values_to_update = []
-        if current_level is not None:
-            values_to_update.append(current_level)
-        else:
-            values_to_update.append(int(existing_hero_data[2]) if len(existing_hero_data) > 2 and existing_hero_data[2] else 0)  # Preserve existing level if not provided
+        # 13. Calculate relic requirements
+        relic_milestones = [1, 10, 20, 30, 40, 50, 60]
+        relic_costs = [500, 6100, 13000, 54000, 80000, 100000, 120000]
 
-        if current_relics is not None:
-            values_to_update.append(current_relics)
+        # 14.Next unlock level
+        next_unlock = next((level for level in relic_milestones if level > current_level and level <= max_level), "Hero Already Maxed")
+        if next_unlock == "Hero Already Maxed":
+            relics_to_next_unlock = "Hero Already Maxed"
         else:
-            values_to_update.append(int(existing_hero_data[3]) if len(existing_hero_data) > 3 and existing_hero_data[3] else 0) # Preserve existing relics if not provided
+            relics_to_next_unlock = relic_costs[relic_milestones.index(next_unlock)] - current_relics
+            if relics_to_next_unlock < 0:
+                relics_to_next_unlock = "You already have enough relics for the next unlock level"
 
-        if next_goal_level is not None:
-            values_to_update.append(next_goal_level)
+        # 15.Next goal level
+        if next_goal_level is None:
+            relics_to_next_goal = "No next goal level has been set"
+        elif current_level >= next_goal_level:
+            relics_to_next_goal = "Current level is higher than next goal level, please adjust using /manage_hero"
         else:
-            values_to_update.append(existing_hero_data[4] if len(existing_hero_data) > 4 and existing_hero_data[4] else '')
+            # Find milestones within the range [current_level, next_goal_level]
+            milestones_in_range = [level for level in relic_milestones if current_level < level <= next_goal_level]
 
-        if ultimate_goal_level is not None:
-            values_to_update.append(ultimate_goal_level)
+            # Calculate the relic cost for each milestone in the range
+            total_relic_cost = sum(relic_costs[relic_milestones.index(level)] for level in milestones_in_range)
+
+            relics_to_next_goal = total_relic_cost - current_relics
+            if relics_to_next_goal < 0:
+                relics_to_next_goal = "You already have enough relics for the next goal level"
+
+        # 16.Ultimate goal level
+        if ultimate_goal_level is None:
+            relics_to_ultimate_goal = "No ultimate goal level has been set"
+        elif current_level >= ultimate_goal_level:
+            relics_to_ultimate_goal = "Current level is higher than ultimate goal level, please adjust using /manage_hero"
         else:
-            values_to_update.append(existing_hero_data[5] if len(existing_hero_data) > 5 and existing_hero_data[5] else '')
+            # Find milestones within the range [current_level, ultimate_goal_level]
+            milestones_in_range = [level for level in relic_milestones if current_level < level <= ultimate_goal_level]
 
-        # 12. Update the spreadsheet
-        range_to_update = f'User Hero Data!C{row_to_update}:F{row_to_update}'  # Update columns C, D, E, and F
+            # Calculate the relic cost for each milestone in the range
+            total_relic_cost = sum(relic_costs[relic_milestones.index(level)] for level in milestones_in_range)
+
+            relics_to_ultimate_goal = total_relic_cost - current_relics
+            if relics_to_ultimate_goal < 0:
+                relics_to_ultimate_goal = "You already have enough relics for the ultimate goal level"
+
+        # 17. Prepare the data to be updated, including calculated relic values
+        values_to_update = [
+            current_level if current_level is not None else (int(existing_hero_data[2]) if len(existing_hero_data) > 2 and existing_hero_data[2] else 0),
+            current_relics if current_relics is not None else (int(existing_hero_data[3]) if len(existing_hero_data) > 3 and existing_hero_data[3] else 0),
+            next_goal_level if next_goal_level is not None else (existing_hero_data[4] if len(existing_hero_data) > 4 and existing_hero_data[4] else ''),
+            ultimate_goal_level if ultimate_goal_level is not None else (existing_hero_data[5] if len(existing_hero_data) > 5 and existing_hero_data[5] else ''),
+            next_unlock,
+            relics_to_next_unlock,
+            relics_to_next_goal,
+            relics_to_ultimate_goal,
+        ]
+
+        # 18. Update the spreadsheet (columns C to J)
+        range_to_update = f'User Hero Data!C{row_to_update}:J{row_to_update}'
         body = {'values': [values_to_update]}
-        print(f"Updating spreadsheet at range {range_to_update} with values: {values_to_update}")
+        print(f"10. Updating spreadsheet at range {range_to_update} with values: {values_to_update}")
         service.spreadsheets().values().update(
             spreadsheetId=SPREADSHEET_ID,
             range=range_to_update,
@@ -547,7 +594,7 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
             body=body
         ).execute()
 
-        # 13. Construct the success message based on which fields were updated
+        # 19. Construct the success message based on which fields were updated
         updated_fields = []
         if current_level is not None:
             updated_fields.append("current level")
@@ -572,7 +619,7 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
         print(f"An error occurred while updating hero data: {e}")
         await interaction.edit_original_response(content="An error occurred while updating hero data. Please try again later.")
 
-# Attach the autocomplete function to the manage_hero command parameter 
+# 20.Attach the autocomplete function to the manage_hero command parameter 
 manage_hero.autocomplete("hero_name")(autocomplete_hero_info)
 
 @bot.tree.command(name="my_heroes_with_input_information", description="Display a list of your tracked heroes with the information you have entered for them")
