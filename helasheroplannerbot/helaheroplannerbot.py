@@ -724,45 +724,42 @@ async def calculate_relics_needed(interaction: discord.Interaction, hero_name: s
         relic_milestones = [1, 10, 20, 30, 40, 50, 60]
         relic_costs = [500, 6100, 13000, 54000, 80000, 100000, 120000]
 
-        # Next unlock level
+        # Next unlock level (no changes here)
         next_unlock = next((level for level in relic_milestones if level > current_level and level <= max_level), "Hero Already Maxed")
-
         if next_unlock == "Hero Already Maxed":
             relics_to_next_unlock = "Hero Already Maxed"
-        else:  # Only calculate relic cost if next_unlock is an integer
+        else:
             relics_to_next_unlock = relic_costs[relic_milestones.index(next_unlock)] - current_relics
             if relics_to_next_unlock < 0:
                 relics_to_next_unlock = "You already have enough relics for the next unlock level"
 
-        # Next goal level
+        # Next goal level (modified to handle non-milestone goal levels)
         if next_goal_level is None:
             relics_to_next_goal = "No next goal level has been set"
         elif current_level >= next_goal_level:
             relics_to_next_goal = "Current level is higher than next goal level, please adjust using /manage_hero"
         else:
-            # Find the indices of current_level and next_goal_level in relic_milestones
-            current_level_index = next((i for i, level in enumerate(relic_milestones) if level >= current_level), 0)
-            next_goal_level_index = relic_milestones.index(next_goal_level)
+            # Find milestones within the range [current_level, next_goal_level]
+            milestones_in_range = [level for level in relic_milestones if current_level < level <= next_goal_level]
 
-            # Calculate the cumulative relic cost
-            total_relic_cost = sum(relic_costs[current_level_index:next_goal_level_index + 1])  # Include the cost for the next_goal_level itself
+            # Calculate the relic cost for each milestone in the range
+            total_relic_cost = sum(relic_costs[relic_milestones.index(level)] for level in milestones_in_range)
 
             relics_to_next_goal = total_relic_cost - current_relics
             if relics_to_next_goal < 0:
                 relics_to_next_goal = "You already have enough relics for the next goal level"
 
-        # Ultimate goal level
+        # Ultimate goal level (modified similarly to next_goal_level)
         if ultimate_goal_level is None:
             relics_to_ultimate_goal = "No ultimate goal level has been set"
         elif current_level >= ultimate_goal_level:
             relics_to_ultimate_goal = "Current level is higher than ultimate goal level, please adjust using /manage_hero"
         else:
-            # Find the indices of current_level and ultimate_goal_level in relic_milestones
-            current_level_index = next((i for i, level in enumerate(relic_milestones) if level >= current_level), 0)
-            ultimate_goal_level_index = relic_milestones.index(ultimate_goal_level)
+            # Find milestones within the range [current_level, ultimate_goal_level]
+            milestones_in_range = [level for level in relic_milestones if current_level < level <= ultimate_goal_level]
 
-            # Calculate the cumulative relic cost
-            total_relic_cost = sum(relic_costs[current_level_index:ultimate_goal_level_index + 1])
+            # Calculate the relic cost for each milestone in the range
+            total_relic_cost = sum(relic_costs[relic_milestones.index(level)] for level in milestones_in_range)
 
             relics_to_ultimate_goal = total_relic_cost - current_relics
             if relics_to_ultimate_goal < 0:
