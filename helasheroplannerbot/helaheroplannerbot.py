@@ -429,7 +429,7 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
 
     try:
         # 1. Fetch existing hero data from 'User Hero Data'
-        user_hero_data_range = 'User Hero Data!A2:J' 
+        user_hero_data_range = 'User Hero Data!A2:P' 
         print(f"Fetching existing hero data for {hero_name} from {user_hero_data_range}...") 
         result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=user_hero_data_range).execute()
         user_data = result.get('values', [])
@@ -467,18 +467,21 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
         max_level = int(hero_row[2])
         print(f"Max level for {hero_name}: {max_level}")
 
-        # 6. Get current level, relics, and goals from existing data or defaults
-        current_level = int(existing_hero_data[2]) if len(existing_hero_data) > 2 and existing_hero_data[2] else 0
-        current_relics = int(existing_hero_data[3]) if len(existing_hero_data) > 3 and existing_hero_data[3] else 0
+        # 6. Get current level, relics, and goals from existing data ONLY if not provided in input
+        if current_level is None or current_relics is None:  # Fetch from sheet only if not provided
+            existing_hero_data = next((row for row in user_data if row and row[0] == str(interaction.user.id) and row[1] == hero_name), None)
+            if current_level is None:
+                current_level = int(existing_hero_data[2]) if len(existing_hero_data) > 2 and existing_hero_data[2] else 0
+            if current_relics is None:
+                current_relics = int(existing_hero_data[3]) if len(existing_hero_data) > 3 and existing_hero_data[3] else 0
 
-        # 7.Handle empty strings as None for goal levels
-        next_goal_level = int(existing_hero_data[4]) if len(existing_hero_data) > 4 and existing_hero_data[4] else None
-        if next_goal_level == 0:  # Treat 0 as not set
-            next_goal_level = None
-
-        ultimate_goal_level = int(existing_hero_data[5]) if len(existing_hero_data) > 5 and existing_hero_data[5] else None
-        if ultimate_goal_level == 0:
-            ultimate_goal_level = None
+        # 7. Get next_goal_level and ultimate_goal_level from existing data ONLY if not provided in input
+        if next_goal_level is None or ultimate_goal_level is None: # Fetch from sheet only if not provided
+            existing_hero_data = next((row for row in user_data if row and row[0] == str(interaction.user.id) and row[1] == hero_name), None)
+            if next_goal_level is None:
+                next_goal_level = int(existing_hero_data[4]) if len(existing_hero_data) > 4 and existing_hero_data[4] else None
+            if ultimate_goal_level is None:
+                ultimate_goal_level = int(existing_hero_data[5]) if len(existing_hero_data) > 5 and existing_hero_data[5] else None
 
         # 8. Input validation for current_level (if provided)
         if current_level is not None and not (0 <= current_level <= max_level):
@@ -571,22 +574,66 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
             if relics_to_ultimate_goal < 0:
                 relics_to_ultimate_goal = "You already have enough relics for the ultimate goal level"
 
-        # 17. Prepare the data to be updated, including calculated relic values
+        # 17. Define XP and oath milestones and costs
+        oath_milestones = [10, 20, 30, 40, 50, 60]
+        oath_costs = [28000, 62000, 250000, 580000, 940000, 1700000]
+
+        xp_milestones = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60]
+        xp_costs = [1800, 2000, 2400, 2600, 2900, 3200, 3600, 4100, 4500, 3600, 4000, 4500, 5000, 5600, 6300, 7000, 7900, 8800, 9900, 14000, 16000, 18000, 20000, 22000, 25000, 28000, 31000, 35000, 39000, 31000, 35000, 39000, 44000, 49000, 55000, 62000, 69000, 78000, 87000, 49000, 55000, 62000, 69000, 78000, 87000, 98000, 110000, 120000, 140000, 85000, 95000, 110000, 120000, 130000, 150000, 170000, 190000, 210000, 240000]
+
+        # 18. Calculate XP and oath requirements
+        def calculate_cost(current_level, target_level, milestones, costs):
+            if current_level >= target_level:
+                return "Current level is higher than the target level"
+            elif target_level == 1:  # Special case for level 1, no oaths needed
+                return 0
+            elif target_level == "Hero Already Maxed": # Handle the max level case
+                return "Hero Already Maxed"
+            else:
+                milestones_in_range = [level for level in milestones if current_level < level <= target_level]
+                total_cost = sum(costs[milestones.index(level)] for level in milestones_in_range)
+                return total_cost
+
+        # XP and oaths to next unlock
+        if next_unlock == "Hero Already Maxed":
+            xp_to_next_unlock = "Hero Already Maxed"
+            oaths_to_next_unlock = "Hero Already Maxed"
+        else:
+            xp_to_next_unlock = calculate_cost(current_level, int(next_unlock), xp_milestones, xp_costs)
+            oaths_to_next_unlock = calculate_cost(current_level, int(next_unlock), oath_milestones, oath_costs)
+
+        # XP and oaths to next goal
+        xp_to_next_goal = calculate_cost(current_level, next_goal_level, xp_milestones, xp_costs) if next_goal_level else "No next goal level has been set"
+        oaths_to_next_goal = calculate_cost(current_level, next_goal_level, oath_milestones, oath_costs) if next_goal_level else "No next goal level has been set"
+
+        # XP and oaths to ultimate goal
+        xp_to_ultimate_goal = calculate_cost(current_level, ultimate_goal_level, xp_milestones, xp_costs) if ultimate_goal_level else "No ultimate goal level has been set"
+        oaths_to_ultimate_goal = calculate_cost(current_level, ultimate_goal_level, oath_milestones, oath_costs) if ultimate_goal_level else "No ultimate goal level has been set"
+
+
+        # 17. Prepare the data to be updated
         values_to_update = [
             current_level if current_level is not None else (int(existing_hero_data[2]) if len(existing_hero_data) > 2 and existing_hero_data[2] else 0),
             current_relics if current_relics is not None else (int(existing_hero_data[3]) if len(existing_hero_data) > 3 and existing_hero_data[3] else 0),
-            next_goal_level if next_goal_level is not None else (existing_hero_data[4] if len(existing_hero_data) > 4 and existing_hero_data[4] else ''),
-            ultimate_goal_level if ultimate_goal_level is not None else (existing_hero_data[5] if len(existing_hero_data) > 5 and existing_hero_data[5] else ''),
+            next_goal_level,  # Use the value from input or existing_hero_data
+            ultimate_goal_level,  # Use the value from input or existing_hero_data
             next_unlock,
             relics_to_next_unlock,
             relics_to_next_goal,
             relics_to_ultimate_goal,
+            xp_to_next_unlock,
+            oaths_to_next_unlock,
+            xp_to_next_goal,
+            oaths_to_next_goal,
+            xp_to_ultimate_goal,
+            oaths_to_ultimate_goal
         ]
 
-        # 18. Update the spreadsheet (columns C to J)
-        range_to_update = f'User Hero Data!C{row_to_update}:J{row_to_update}'
+
+        # 20. Update the spreadsheet (columns C to P)
+        range_to_update = f'User Hero Data!C{row_to_update}:P{row_to_update}'
         body = {'values': [values_to_update]}
-        print(f"10. Updating spreadsheet at range {range_to_update} with values: {values_to_update}")
+        print(f"13. Updating spreadsheet at range {range_to_update} with values: {values_to_update}")
         service.spreadsheets().values().update(
             spreadsheetId=SPREADSHEET_ID,
             range=range_to_update,
@@ -594,7 +641,7 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
             body=body
         ).execute()
 
-        # 19. Construct the success message based on which fields were updated
+        # 21. Construct the success message based on which fields were updated
         updated_fields = []
         if current_level is not None:
             updated_fields.append("current level")
@@ -619,7 +666,7 @@ async def manage_hero(interaction: discord.Interaction, hero_name: str, current_
         print(f"An error occurred while updating hero data: {e}")
         await interaction.edit_original_response(content="An error occurred while updating hero data. Please try again later.")
 
-# 20.Attach the autocomplete function to the manage_hero command parameter 
+# 22.Attach the autocomplete function to the manage_hero command parameter 
 manage_hero.autocomplete("hero_name")(autocomplete_hero_info)
 
 @bot.tree.command(name="my_heroes_with_input_information", description="Display a list of your tracked heroes with the information you have entered for them")
@@ -858,5 +905,123 @@ async def help_command(interaction: discord.Interaction):
         embed.add_field(name=f"/{command.name}", value=command.description, inline=False)
 
     await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="calculate_xp_and_oaths_needed", description="Calculate XP and oaths needed for various goals for a tracked hero")
+async def calculate_xp_and_oaths_needed(interaction: discord.Interaction, hero_name: str):
+    await interaction.response.defer()
+
+    try:
+        # 1. Fetch existing hero data from 'User Hero Data'
+        user_hero_data_range = 'User Hero Data!A2:P'  # Include columns up to P for calculations
+        print(f"1. Fetching existing hero data for {hero_name} from {user_hero_data_range}...")
+        result = service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=user_hero_data_range).execute()
+        user_data = result.get('values', [])
+        print(f"1. User data fetched: {user_data}")
+
+        # 2. Find the row to update, matching both user_id and hero_name
+        user_id = str(interaction.user.id)
+        row_to_update = next(
+            (i + 2 for i, row in enumerate(user_data) if row and row[0] == user_id and row[1] == hero_name),
+            None
+        )
+        print(f"2. Row to update: {row_to_update}")
+
+        if row_to_update is None:
+            raise ValueError(f"2. Hero '{hero_name}' was not found in your tracking list. Add the hero first using the 'add_hero' command.")
+
+        # 3. Fetch existing hero data (to get current level, relics, and goals)
+        existing_hero_data = next((row for row in user_data if row and row[0] == str(interaction.user.id) and row[1] == hero_name), None)
+
+        # 4. Get current level, relics, next unlock level, and goals from existing data or defaults
+        current_level = int(existing_hero_data[2]) if len(existing_hero_data) > 2 and existing_hero_data[2] else 0
+        current_relics = int(existing_hero_data[3]) if len(existing_hero_data) > 3 and existing_hero_data[3] else 0
+        next_unlock = existing_hero_data[6] if len(existing_hero_data) > 6 and existing_hero_data[6] else None 
+
+        # Handle empty strings as None for goal levels
+        next_goal_level = int(existing_hero_data[4]) if len(existing_hero_data) > 4 and existing_hero_data[4] else None
+        if next_goal_level == 0:  # Treat 0 as not set
+            next_goal_level = None
+
+        ultimate_goal_level = int(existing_hero_data[5]) if len(existing_hero_data) > 5 and existing_hero_data[5] else None
+        if ultimate_goal_level == 0:
+            ultimate_goal_level = None
+
+        # 5. Define XP and oath milestones and costs
+        oath_milestones = [10, 20, 30, 40, 50, 60]
+        oath_costs = [28000, 62000, 250000, 580000, 940000, 1700000]
+
+        xp_milestones = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60]
+        xp_costs = [1800, 2000, 2400, 2600, 2900, 3200, 3600, 4100, 4500, 3600, 4000, 4500, 5000, 5600, 6300, 7000, 7900, 8800, 9900, 14000, 16000, 18000, 20000, 22000, 25000, 28000, 31000, 35000, 39000, 31000, 35000, 39000, 44000, 49000, 55000, 62000, 69000, 78000, 87000, 49000, 55000, 62000, 69000, 78000, 87000, 98000, 110000, 120000, 140000, 85000, 95000, 110000, 120000, 130000, 150000, 170000, 190000, 210000, 240000]
+
+        # 6. Calculate XP and oath requirements
+        def calculate_cost(current_level, target_level, milestones, costs):
+            if current_level >= target_level:
+                return "Current level is higher than the target level"
+            elif target_level == 1:  # Special case for level 1, no oaths needed
+                return 0
+            else:
+                milestones_in_range = [level for level in milestones if current_level < level <= target_level]
+                total_cost = sum(costs[milestones.index(level)] for level in milestones_in_range)
+                return total_cost
+
+        # XP and oaths to next unlock
+        if next_unlock == "Hero Already Maxed":
+            xp_to_next_unlock = "Hero Already Maxed"
+            oaths_to_next_unlock = "Hero Already Maxed"
+        else:
+            xp_to_next_unlock = calculate_cost(current_level, int(next_unlock), xp_milestones, xp_costs)
+            oaths_to_next_unlock = calculate_cost(current_level, int(next_unlock), oath_milestones, oath_costs)
+
+        # XP and oaths to next goal
+        xp_to_next_goal = calculate_cost(current_level, next_goal_level, xp_milestones, xp_costs) if next_goal_level else "No next goal level has been set"
+        oaths_to_next_goal = calculate_cost(current_level, next_goal_level, oath_milestones, oath_costs) if next_goal_level else "No next goal level has been set"
+
+        # XP and oaths to ultimate goal
+        xp_to_ultimate_goal = calculate_cost(current_level, ultimate_goal_level, xp_milestones, xp_costs) if ultimate_goal_level else "No ultimate goal level has been set"
+        oaths_to_ultimate_goal = calculate_cost(current_level, ultimate_goal_level, oath_milestones, oath_costs) if ultimate_goal_level else "No ultimate goal level has been set"
+
+        # 7. Update calculated values in the spreadsheet (columns K to P)
+        range_to_update = f'User Hero Data!K{row_to_update}:P{row_to_update}'
+        values_to_update = [[
+            xp_to_next_unlock, oaths_to_next_unlock, 
+            xp_to_next_goal, oaths_to_next_goal, 
+            xp_to_ultimate_goal, oaths_to_ultimate_goal
+        ]]
+        print(f"7. Updating spreadsheet at range {range_to_update} with values: {values_to_update}")
+        service.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=range_to_update,
+            valueInputOption='RAW',
+            body={'values': values_to_update}
+        ).execute()
+
+        # 8. Create the embed with hero information
+        embed = discord.Embed(title=f"{hero_name} Requirements")
+
+        # Combine all information into a single field value with manual newlines
+        field_value = (
+            f"**Current Level:** {current_level}\n"
+            f"**Next Unlock Level:** {next_unlock}\n"
+            f"**XP Needed for Next Unlock:** {xp_to_next_unlock}\n"
+            f"**Oaths Needed for Next Unlock:** {oaths_to_next_unlock}\n"
+            f"**Next Goal Level:** {next_goal_level if next_goal_level is not None else 'No next goal level has been set'}\n"
+            f"**XP Needed for Next Goal:** {xp_to_next_goal}\n"
+            f"**Oaths Needed for Next Goal:** {oaths_to_next_goal}\n"
+            f"**Ultimate Goal Level:** {ultimate_goal_level if ultimate_goal_level is not None else 'No ultimate goal level has been set'}\n"
+            f"**XP Needed for Ultimate Goal:** {xp_to_ultimate_goal}\n"
+            f"**Oaths Needed for Ultimate Goal:** {oaths_to_ultimate_goal}\n"
+        )
+
+        embed.add_field(name="\u200b", value=field_value, inline=False)  # Use a zero-width space for the field name
+
+        await interaction.edit_original_response(content="", embed=embed)
+
+    except ValueError as e:
+        await interaction.edit_original_response(content=str(e))
+    except Exception as e:
+        print(f"An error occurred while processing hero information: {e}")
+
+# Attach the autocomplete function to the calculate_xp_and_oaths_needed command parameter
+calculate_xp_and_oaths_needed.autocomplete("hero_name")(autocomplete_hero_info)
 
 bot.run("MTI3OTgwMTc1MDY1NTg2NDgzMg.GwwLJ7.srhVj6BNTPN_odUdSUdi-ki-jJksKv7vf095K4")
